@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Merovius/srvfb/internal/png"
 
 	"golang.org/x/sys/unix"
 )
@@ -43,6 +43,11 @@ func run(ctx *context) error {
 	if err := ctx.openFB(*tick); err != nil {
 		return err
 	}
+
+	http.Handle("/", ctx.Handler())
+	go func() {
+		log.Println(http.ListenAndServe(":9000", nil))
+	}()
 
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -184,69 +189,30 @@ func (ctx *context) forEach(f func([]byte) error) {
 	}
 }
 
-type rleReader struct {
-	r *bufio.Reader
-	n int
-	c byte
-}
-
-func newReader(r io.Reader) *rleReader {
-	return &rleReader{r: bufio.NewReader(r)}
-}
-
-func (r *rleReader) Read(p []byte) (n int, err error) {
-	for ; n < len(p); n++ {
-		if r.n == 0 {
-			if err = r.next(); err != nil {
-				return n, err
-			}
+func (ctx *context) Handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			log.Println("Not a flusher")
+			http.Error(w, "internal", 500)
+			return
 		}
-		r.n--
-		p[n] = r.c
-	}
-	return n, nil
-}
 
-func (r *rleReader) next() error {
-	var buf [3]byte
-	_, err := io.ReadFull(r.r, buf[:])
-	if err != nil {
-		return err
-	}
-	l := binary.BigEndian.Uint16(buf[:2])
-	if l == 0 {
-		return errors.New("invalid data")
-	}
-	r.n = int(l)
-	r.c = buf[2]
-	return nil
-}
-
-type rleWriter struct{ w *bufio.Writer }
-
-func newWriter(w io.Writer) *rleWriter {
-	return &rleWriter{bufio.NewWriter(w)}
-}
-
-func (w *rleWriter) Write(p []byte) (n int, err error) {
-	for n < len(p) {
-		c, l := p[n], 1
-		for ; n+l < len(p); l++ {
-			if p[n+l] != c {
-				break
+		w.Header().Set("Content-Type", "multipart/x-mixed-replace;boundary=endofsection")
+		mpw := multipart.NewWriter(w)
+		mpw.SetBoundary("endofsection")
+		hdr := make(textproto.MIMEHeader)
+		hdr.Add("Content-Type", "image/png")
+		im := image.NewGray16(image.Rect(0, 0, W, H))
+		ctx.forEach(func(b []byte) error {
+			im.Pix = b
+			w, err := mpw.CreatePart(hdr)
+			if err != nil {
+				return err
 			}
-			if l == (1<<16)-1 {
-				break
-			}
-		}
-		var buf [3]byte
-		binary.BigEndian.PutUint16(buf[:2], uint16(l))
-		buf[2] = c
-		_, err = w.w.Write(buf[:])
-		if err != nil {
-			return n, err
-		}
-		n += l
-	}
-	return n, w.w.Flush()
+			png.WritePNG(w, im)
+			flusher.Flush()
+			return nil
+		})
+	})
 }

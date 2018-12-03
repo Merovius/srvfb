@@ -17,6 +17,8 @@ and it's taylored specifically to the reMarkable (e.g. it can only stream
 I don't make any promises in regards to support or stability and any issues not
 directly related to my usecase will likely be closed.
 
+You can see a short video demonstrating this [in this tweet][video]
+
 # Installation and usage
 
 You need a working [Go installation][go] and [ssh-access to your reMarkable][ssh].
@@ -76,3 +78,4 @@ limitations under the License.
 [reMarkable]: https://remarkable.com/
 [go]: https://golang.org/doc/install
 [ssh]: https://remarkablewiki.com/tech/ssh
+[video]: https://twitter.com/TheMerovius/status/1066455790117097472

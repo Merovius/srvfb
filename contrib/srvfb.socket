@@ -1,0 +1,9 @@
+[Unit]
+Description=Framebuffer Server Socket
+
+[Socket]
+ListenStream=1234
+BindToDevice=usb0
+
+[Install]
+WantedBy=sockets.target

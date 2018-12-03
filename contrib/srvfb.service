@@ -1,0 +1,9 @@
+[Unit]
+Description=Framebuffer Server
+
+[Service]
+ExecStart=/usr/bin/srvfb -device /dev/fb0
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

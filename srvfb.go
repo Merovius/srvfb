@@ -27,6 +27,7 @@ import (
 	"log"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/textproto"
 	"os"
@@ -41,12 +42,13 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		os.Exit(1)
 	}
 }
 
 func run() error {
-	listen := flag.String("listen", ":1234", "Address to listen on")
+	listen := flag.String("listen", "", "Address to listen on")
 	proxy := flag.String("proxy", "", "Proxy the screen from the given address")
 	device := flag.String("device", "", "Framebuffer device to serve")
 	flag.Parse()
@@ -57,10 +59,30 @@ func run() error {
 	if (*proxy == "") == (*device == "") {
 		return errors.New("exactly one of -proxy or -device is required")
 	}
+	if len(listenFDs) > 1 {
+		return errors.New("more than one file descriptor passed by service manager")
+	}
+	var (
+		l   net.Listener
+		err error
+	)
+	if len(listenFDs) > 0 {
+		if *listen != "" {
+			return errors.New("can't use -listen with socket activation")
+		}
+		l, err = net.FileListener(listenFDs[0])
+	} else {
+		if *listen == "" {
+			return errors.New("no file descriptor passed by service manager and no -listen set")
+		}
+		l, err = net.Listen("tcp", *listen)
+	}
+	if err != nil {
+		return err
+	}
 
 	h := new(handler)
 
-	var err error
 	if *device != "" {
 		h.fb, err = open(*device)
 	}
@@ -69,7 +91,8 @@ func run() error {
 	}
 	h.proxy = *proxy
 	http.Handle("/", h)
-	return http.ListenAndServe(*listen, nil)
+
+	return http.Serve(l, nil)
 }
 
 type handler struct {
@@ -352,4 +375,51 @@ func (c *proxyconn) read(im *image.Gray16) error {
 
 func (c *proxyconn) close() {
 	c.closer.Close()
+}
+
+var listenFDs []*os.File
+
+func init() {
+	defer func() {
+		os.Unsetenv("LISTEN_PID")
+		os.Unsetenv("LISTEN_FDS")
+		os.Unsetenv("LISTEN_FDNAMES")
+	}()
+	var (
+		pid   int
+		fds   int
+		names []string
+		err   error
+	)
+	if s := os.Getenv("LISTEN_PID"); s == "" {
+		return
+	} else {
+		pid, err = strconv.Atoi(s)
+	}
+	if err != nil {
+		log.Printf("Can't parse $LISTEN_PID: %v", err)
+		return
+	}
+	if os.Getpid() != pid {
+		return
+	}
+	if s := os.Getenv("LISTEN_FDS"); s == "" {
+		return
+	} else {
+		fds, err = strconv.Atoi(s)
+	}
+	if err != nil {
+		log.Printf("Can't parse $LISTEN_PID: %v", err)
+		return
+	}
+	if s := os.Getenv("LISTEN_FDNAMES"); s != "" {
+		names = strings.Split(s, ":")
+	}
+	for i := len(names); i < fds; i++ {
+		names = append(names, "unknown")
+	}
+	for i := 0; i < fds; i++ {
+		unix.FcntlInt(3+uintptr(i), unix.F_SETFD, unix.FD_CLOEXEC)
+		listenFDs = append(listenFDs, os.NewFile(3+uintptr(i), names[i]))
+	}
 }

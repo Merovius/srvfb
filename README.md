@@ -47,8 +47,8 @@ network, though. To use it, run
 `
 cd $(go env GOPATH)/src/github.com/Merovius/srvfb
 GOARCH=arm GOOS=linux go build github.com/Merovius/srvfb
-scp srvfb root@10.11.99.1:/opt/
-scp contrib/srvfb.service contrib/srvfb.socket root:10.11.99.1:/etc/systemd/system
+scp srvfb root@10.11.99.1:/usr/bin
+scp contrib/srvfb.service contrib/srvfb.socket root@10.11.99.1:/etc/systemd/system
 ssh root@10.11.99.1 systemctl enable --now srvfb.socket
 `
 

@@ -22,21 +22,21 @@ directly related to my usecase will likely be closed.
 You need a working [Go installation][go] and [ssh-access to your reMarkable][ssh].
 You can then obtain, install and run the code via
 
-`
+```
 go get -d -u github.com/Merovius/srvfb
 GOARCH=arm GOOS=linux go build github.com/Merovius/srvfb
 scp srvfb root@10.11.99.1:
 ssh root@10.11.99.1 ./srvfb -device /dev/fb0
-`
+```
 
 If you then open `http://10.11.99.1:1234/video` in your browser (only Chrome
 is tested) you should see the stream from your reMarkable. To use proxy-mode,
 run (in a separate terminal)
 
-`
+```
 go build github.com/Merovius/srvfb
 ./srvfb -listen localhost:1234 -proxy 10.11.99.1
-`
+```
 
 and open `http://localhost:1234/video` in your browser.
 
@@ -44,13 +44,13 @@ This repository also contains systemd unit files to run `srvfb` automatically
 (using socket activation). For security reasons, it only listens on the USB
 network, though. To use it, run
 
-`
+```
 cd $(go env GOPATH)/src/github.com/Merovius/srvfb
 GOARCH=arm GOOS=linux go build github.com/Merovius/srvfb
 scp srvfb root@10.11.99.1:/usr/bin
 scp contrib/srvfb.service contrib/srvfb.socket root@10.11.99.1:/etc/systemd/system
 ssh root@10.11.99.1 systemctl enable --now srvfb.socket
-`
+```
 
 # License
 

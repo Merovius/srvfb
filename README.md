@@ -31,16 +31,19 @@ scp srvfb root@10.11.99.1:
 ssh root@10.11.99.1 ./srvfb -device /dev/fb0 -listen :1234
 ```
 
-If you then open `http://10.11.99.1:1234/video` in your browser (only Chrome
-is tested) you should see the stream from your reMarkable. To use proxy-mode,
-run (in a separate terminal)
+If you then open `http://10.11.99.1:1234/` in your browser (only Chrome is
+tested) you should see the stream from your reMarkable. To use proxy-mode, run
+(in a separate terminal)
 
 ```
 go build github.com/Merovius/srvfb
-./srvfb -listen localhost:1234 -proxy 10.11.99.1
+./srvfb -listen localhost:1234 -proxy 10.11.99.1:1234
 ```
 
-and open `http://localhost:1234/video` in your browser.
+and open `http://localhost:1234/` in your browser.
+
+Once you can see the reMarkable screen in your browser (via proxy or not),
+clicking on the image should rotate it by 90°.
 
 This repository also contains systemd unit files to run `srvfb` automatically
 (using socket activation). For security reasons, it only listens on the USB

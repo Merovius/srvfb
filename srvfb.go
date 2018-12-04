@@ -148,7 +148,6 @@ func (h *handler) serveRaw(w http.ResponseWriter, r *http.Request) {
 	hdr := make(textproto.MIMEHeader)
 	hdr.Add("Content-Type", "binary/octet-stream")
 
-	log.Println("writing header")
 	part, err := mpw.CreatePart(hdr)
 	if err != nil {
 		log.Println(err)
@@ -162,24 +161,20 @@ func (h *handler) serveRaw(w http.ResponseWriter, r *http.Request) {
 
 	im := new(image.Gray16)
 	for {
-		log.Println("reading image")
 		if err := h.fb.read(im); err != nil {
 			log.Println(err)
 			return
 		}
-		log.Println("starting multipart")
 		w, err := mpw.CreatePart(hdr)
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		log.Println("writing image")
 		_, err = w.Write(im.Pix)
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		log.Println("flushing")
 		flusher.Flush()
 	}
 }
@@ -219,20 +214,16 @@ func (h *handler) serveVideo(w http.ResponseWriter, r *http.Request) {
 	im := new(image.Gray16)
 	enc := &png.Encoder{CompressionLevel: png.BestSpeed}
 	for {
-		log.Println("reading image")
 		if err := reader.read(im); err != nil {
 			log.Println(err)
 			return
 		}
-		log.Println("starting multipart")
 		w, err := mpw.CreatePart(hdr)
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		log.Println("encoding png")
 		enc.Encode(w, im)
-		log.Println("flushing")
 		flusher.Flush()
 	}
 }

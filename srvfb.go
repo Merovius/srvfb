@@ -21,6 +21,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"hash"
+	"hash/fnv"
 	"image"
 	"io"
 	"io/ioutil"
@@ -34,6 +36,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Merovius/srvfb/internal/png"
 
@@ -160,10 +163,14 @@ func (h *handler) serveRaw(w http.ResponseWriter, r *http.Request) {
 	}
 
 	im := new(image.Gray16)
+	var dedup deduper
 	for {
 		if err := h.fb.read(im); err != nil {
 			log.Println(err)
 			return
+		}
+		if dedup.skip(im.Pix) {
+			continue
 		}
 		w, err := mpw.CreatePart(hdr)
 		if err != nil {
@@ -213,10 +220,15 @@ func (h *handler) serveVideo(w http.ResponseWriter, r *http.Request) {
 	hdr.Add("Content-Type", "image/png")
 	im := new(image.Gray16)
 	enc := &png.Encoder{CompressionLevel: png.BestSpeed}
+	var dedup deduper
 	for {
 		if err := reader.read(im); err != nil {
 			log.Println(err)
 			return
+		}
+		if dedup.skip(im.Pix) {
+			time.Sleep(500 * time.Millisecond)
+			continue
 		}
 		w, err := mpw.CreatePart(hdr)
 		if err != nil {
@@ -440,6 +452,30 @@ func (c *proxyconn) read(im *image.Gray16) error {
 
 func (c *proxyconn) close() {
 	c.closer.Close()
+}
+
+// deduper keeps state to deduplicate sent frames. For some reason, Chrome only
+// seems to show a frame *after* the frame after has been sent (i.e. it lags
+// behind one frame), so we only start skipping after two consecutive frames
+// are identical.
+type deduper struct {
+	h  hash.Hash32
+	h1 uint32
+	h2 uint32
+}
+
+func (d *deduper) skip(b []byte) bool {
+	if d.h == nil {
+		d.h = fnv.New32a()
+	}
+	d.h.Reset()
+	d.h.Write(b)
+	h := d.h.Sum32()
+	if h == d.h1 && h == d.h2 {
+		return true
+	}
+	d.h1, d.h2 = d.h2, h
+	return false
 }
 
 var listenFDs []*os.File

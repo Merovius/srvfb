@@ -16,7 +16,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -25,7 +24,6 @@ import (
 	"hash/fnv"
 	"image"
 	"io"
-	"io/ioutil"
 	"log"
 	"mime"
 	"mime/multipart"
@@ -33,13 +31,13 @@ import (
 	"net/http"
 	"net/textproto"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/Merovius/srvfb/internal/fb"
 	"github.com/Merovius/srvfb/internal/png"
 
 	"golang.org/x/sys/unix"
@@ -91,7 +89,7 @@ func run() error {
 	h := new(handler)
 
 	if *device != "" {
-		h.fb, err = open(*device)
+		h.fb, err = fb.Open(*device)
 	}
 	if err != nil {
 		return err
@@ -106,7 +104,7 @@ func run() error {
 }
 
 type handler struct {
-	fb    *fb
+	fb    *fb.Device
 	proxy string
 }
 
@@ -150,6 +148,13 @@ func (h *handler) serveRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	vinfo, err := h.fb.VarScreeninfo()
+	if err != nil {
+		log.Println(err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "multipart/x-mixed-replace;boundary=endofsection")
 	w.WriteHeader(http.StatusOK)
 
@@ -163,7 +168,7 @@ func (h *handler) serveRaw(w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
-	rhdr := &rawHeader{version, 16, 0, uint32(h.fb.width), uint32(h.fb.height)}
+	rhdr := &rawHeader{version, 16, 0, vinfo.Xres, vinfo.Yres}
 	if err = binary.Write(part, binary.BigEndian, rhdr); err != nil {
 		log.Println(err)
 		return
@@ -172,7 +177,7 @@ func (h *handler) serveRaw(w http.ResponseWriter, r *http.Request) {
 	im := new(image.Gray16)
 	var dedup deduper
 	for {
-		if err := h.fb.read(im); err != nil {
+		if err := h.readImage(im); err != nil {
 			log.Println(err)
 			return
 		}
@@ -202,7 +207,7 @@ func (h *handler) serveVideo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var reader interface {
-		read(im *image.Gray16) error
+		readImage(im *image.Gray16) error
 	}
 
 	if h.proxy != "" {
@@ -215,7 +220,7 @@ func (h *handler) serveVideo(w http.ResponseWriter, r *http.Request) {
 		defer c.close()
 		reader = c
 	} else {
-		reader = h.fb
+		reader = h
 	}
 
 	w.Header().Set("Content-Type", "multipart/x-mixed-replace;boundary=endofsection")
@@ -229,7 +234,7 @@ func (h *handler) serveVideo(w http.ResponseWriter, r *http.Request) {
 	enc := &png.Encoder{CompressionLevel: png.BestSpeed}
 	var dedup deduper
 	for {
-		if err := reader.read(im); err != nil {
+		if err := reader.readImage(im); err != nil {
 			log.Println(err)
 			return
 		}
@@ -320,66 +325,20 @@ func (h *handler) serveIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) readImage(im *image.Gray16) error {
-	if h.proxy == "" {
-		return h.fb.read(im)
-	}
-	return errors.New("not implemented")
-}
-
-type fb struct {
-	file   []byte
-	width  int
-	height int
-}
-
-func open(file string) (*fb, error) {
-	fb := new(fb)
-
-	// TODO: Use framebuffer ioctls
-	base := filepath.Base(file)
-	sysfs := filepath.Join("/sys/class/graphics/", base)
-
-	buf, err := ioutil.ReadFile(filepath.Join(sysfs, "virtual_size"))
+	vim, err := h.fb.Image()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	sp := strings.Split(string(bytes.TrimSpace(buf)), ",")
-	if len(sp) != 2 {
-		return nil, errors.New("invalid format of virtual_size")
+	gim, ok := vim.(*image.Gray16)
+	if !ok {
+		return errors.New("framebuffer is not 16-bit grayscale")
 	}
-	if fb.width, err = strconv.Atoi(sp[0]); err != nil {
-		return nil, err
+	if len(im.Pix) < len(gim.Pix) {
+		im.Pix = append(im.Pix, make([]byte, len(gim.Pix)-len(im.Pix))...)
 	}
-	if fb.height, err = strconv.Atoi(sp[1]); err != nil {
-		return nil, err
-	}
-	// TODO: Why is the height too large?
-	fb.height /= 2
-
-	buf, err = ioutil.ReadFile(filepath.Join(sysfs, "bits_per_pixel"))
-	if err != nil {
-		return nil, err
-	}
-	if bpp, err := strconv.Atoi(string(bytes.TrimSpace(buf))); err != nil || bpp != 16 {
-		return nil, errors.New("invalid bits_per_pixel")
-	}
-	f, err := os.OpenFile(file, os.O_RDONLY, 0)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	if fb.file, err = unix.Mmap(int(f.Fd()), 0, fb.width*fb.height*2, unix.PROT_READ, unix.MAP_SHARED); err != nil {
-		return nil, fmt.Errorf("mmap failed: %v", err)
-	}
-	return fb, nil
-}
-
-func (fb *fb) read(im *image.Gray16) error {
-	if im.Pix == nil {
-		*im = *image.NewGray16(image.Rect(0, 0, fb.width, fb.height))
-	}
-	copy(im.Pix, fb.file)
+	copy(im.Pix, gim.Pix)
+	im.Stride = gim.Stride
+	im.Rect = gim.Rect
 	return nil
 }
 
@@ -441,7 +400,7 @@ func (c *proxyconn) readHdr(resp *http.Response) error {
 	return nil
 }
 
-func (c *proxyconn) read(im *image.Gray16) error {
+func (c *proxyconn) readImage(im *image.Gray16) error {
 	if len(im.Pix) != c.width*c.height*2 {
 		*im = *image.NewGray16(image.Rect(0, 0, c.width, c.height))
 	}

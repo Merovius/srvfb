@@ -2,8 +2,8 @@
 Description=Framebuffer Server
 
 [Service]
-ExecStart=/usr/bin/srvfb -device /dev/fb0
-Restart=always
+ExecStart=/usr/bin/srvfb -device /dev/fb0 -idle 1m
+Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target

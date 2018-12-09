@@ -36,6 +36,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Merovius/srvfb/internal/png"
@@ -54,6 +56,7 @@ func run() error {
 	listen := flag.String("listen", "", "Address to listen on")
 	proxy := flag.String("proxy", "", "Proxy the screen from the given address")
 	device := flag.String("device", "", "Framebuffer device to serve")
+	idle := flag.Duration("idle", 0, "Exit if there's no activity for this time. 0 disables this")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		return errors.New("usage: srvfb [<flags>]")
@@ -83,6 +86,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	l = wrapListener(l, *idle)
 
 	h := new(handler)
 
@@ -94,8 +98,11 @@ func run() error {
 	}
 	h.proxy = *proxy
 	http.Handle("/", h)
-
-	return http.Serve(l, nil)
+	if err = http.Serve(l, nil); err == errIdle {
+		log.Printf("No activity for %v, shutting down", *idle)
+		err = nil
+	}
+	return err
 }
 
 type handler struct {
@@ -476,6 +483,67 @@ func (d *deduper) skip(b []byte) bool {
 	}
 	d.h1, d.h2 = d.h2, h
 	return false
+}
+
+var errIdle = errors.New("idle timeout")
+
+// wrapListener wraps l with an idle timeout, if possible. A zero timeout
+// disables timeouts. If setting a timeout fails, the returned Listener falls
+// back to the behavior of the wrapped Listener.
+func wrapListener(l net.Listener, timeout time.Duration) net.Listener {
+	tl, ok := l.(*net.TCPListener)
+	if !ok || timeout == 0 {
+		return l
+	}
+	return &listener{
+		TCPListener: tl,
+		timeout:     timeout,
+	}
+}
+
+type listener struct {
+	acceptMu sync.Mutex
+	active   uint32
+	*net.TCPListener
+	timeout time.Duration
+}
+
+// Accept implements net.Conn. Connections returned by Accept are tracked. Once
+// all active connections are closed and the idle timeout expires, Accept
+// returns errIdle.
+func (l *listener) Accept() (net.Conn, error) {
+	l.acceptMu.Lock()
+	defer l.acceptMu.Unlock()
+
+	if atomic.LoadUint32(&l.active) == 0 {
+		l.SetDeadline(time.Now().Add(l.timeout))
+	}
+	c, err := l.TCPListener.Accept()
+	if err == nil {
+		atomic.AddUint32(&l.active, 1)
+		l.SetDeadline(time.Time{})
+		return &conn{l: l, Conn: c}, nil
+	}
+	to, ok := err.(interface{ Timeout() bool })
+	if !ok || !to.Timeout() {
+		return nil, err
+	}
+	return nil, errIdle
+}
+
+type conn struct {
+	o sync.Once
+	l *listener
+	net.Conn
+}
+
+func (c *conn) Close() error {
+	c.o.Do(func() {
+		if atomic.AddUint32(&c.l.active, ^uint32(0)) == 0 {
+			c.l.SetDeadline(time.Now().Add(c.l.timeout))
+		}
+	})
+	return c.Conn.Close()
 }
 
 var listenFDs []*os.File

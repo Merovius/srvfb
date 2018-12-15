@@ -135,7 +135,7 @@ const version = 1
 type rawHeader struct {
 	Version      uint8
 	BitsPerPixel uint8
-	_            uint16 // reserved
+	Stride       uint16
 	Width        uint32
 	Height       uint32
 }
@@ -148,8 +148,8 @@ func (h *handler) serveRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vinfo, err := h.fb.VarScreeninfo()
-	if err != nil {
+	im := new(image.Gray16)
+	if err := h.readImage(im); err != nil {
 		log.Println(err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -168,20 +168,31 @@ func (h *handler) serveRaw(w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
-	rhdr := &rawHeader{version, 16, 0, vinfo.Xres, vinfo.Yres}
+	rhdr := &rawHeader{version, 16, uint16(im.Stride), uint32(im.Rect.Dx()), uint32(im.Rect.Dy())}
 	if err = binary.Write(part, binary.BigEndian, rhdr); err != nil {
 		log.Println(err)
 		return
 	}
+	part, err = mpw.CreatePart(hdr)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	_, err = w.Write(im.Pix[im.Rect.Min.Y*im.Stride : im.Rect.Max.Y*im.Stride])
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	flusher.Flush()
 
-	im := new(image.Gray16)
 	var dedup deduper
 	for {
 		if err := h.readImage(im); err != nil {
 			log.Println(err)
 			return
 		}
-		if dedup.skip(im.Pix) {
+		pix := im.Pix[im.Rect.Min.Y*im.Stride : im.Rect.Max.Y*im.Stride]
+		if dedup.skip(pix) {
 			continue
 		}
 		w, err := mpw.CreatePart(hdr)
@@ -189,7 +200,7 @@ func (h *handler) serveRaw(w http.ResponseWriter, r *http.Request) {
 			log.Println(err)
 			return
 		}
-		_, err = w.Write(im.Pix)
+		_, err = w.Write(pix)
 		if err != nil {
 			log.Println(err)
 			return
@@ -345,6 +356,7 @@ func (h *handler) readImage(im *image.Gray16) error {
 type proxyconn struct {
 	r      *multipart.Reader
 	closer io.Closer
+	stride int
 	width  int
 	height int
 }
@@ -395,14 +407,19 @@ func (c *proxyconn) readHdr(resp *http.Response) error {
 	if hdr.BitsPerPixel != 16 {
 		return fmt.Errorf("incompatible bits per pixel %d", hdr.BitsPerPixel)
 	}
+	c.stride = int(hdr.Stride)
 	c.width = int(hdr.Width)
 	c.height = int(hdr.Height)
 	return nil
 }
 
 func (c *proxyconn) readImage(im *image.Gray16) error {
-	if len(im.Pix) != c.width*c.height*2 {
-		*im = *image.NewGray16(image.Rect(0, 0, c.width, c.height))
+	if len(im.Pix) != c.stride*c.height {
+		*im = image.Gray16{
+			Pix:    make([]byte, c.stride*c.height),
+			Stride: c.stride,
+			Rect:   image.Rect(0, 0, c.width, c.height),
+		}
 	}
 	part, err := c.r.NextPart()
 	if err != nil {
@@ -483,7 +500,9 @@ func (l *listener) Accept() (net.Conn, error) {
 		l.SetDeadline(time.Time{})
 		return &conn{l: l, Conn: c}, nil
 	}
-	to, ok := err.(interface{ Timeout() bool })
+	to, ok := err.(interface {
+		Timeout() bool
+	})
 	if !ok || !to.Timeout() {
 		return nil, err
 	}

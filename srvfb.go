@@ -378,6 +378,9 @@ func (h *handler) readImage(im *image.Gray16) error {
 		im.Pix = append(im.Pix, make([]byte, len(gim.Pix)-len(im.Pix))...)
 	}
 	copy(im.Pix, gim.Pix)
+	for i := 1; i < len(im.Pix); i += 2 {
+		im.Pix[i-1], im.Pix[i] = im.Pix[i], im.Pix[i-1]
+	}
 	im.Stride = gim.Stride
 	im.Rect = gim.Rect
 	return nil

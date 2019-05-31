@@ -26,7 +26,7 @@ You can then obtain, install and run the code via
 
 ```
 go get -d -u github.com/Merovius/srvfb
-GOARCH=arm GOOS=linux go build github.com/Merovius/srvfb
+GOARCH=arm GOARM=7 GOOS=linux go build github.com/Merovius/srvfb
 scp srvfb root@10.11.99.1:
 ssh root@10.11.99.1 ./srvfb -device /dev/fb0 -listen :1234
 ```

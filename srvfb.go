@@ -125,6 +125,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.serveRaw(w, r)
+	case "/download":
+		h.serveImage(w, r)
 	default:
 		http.Error(w, fmt.Sprintf("%q not found", r.URL.Path), http.StatusNotFound)
 	}
@@ -261,6 +263,34 @@ func (h *handler) serveVideo(w http.ResponseWriter, r *http.Request) {
 		enc.Encode(w, im)
 		flusher.Flush()
 	}
+}
+
+func (h *handler) serveImage(w http.ResponseWriter, r *http.Request) {
+	var reader interface {
+		readImage(im *image.Gray16) error
+	}
+
+	if h.proxy != "" {
+		c, err := dialProxy(h.proxy)
+		if err != nil {
+			log.Println(err)
+			http.Error(w, "Bad Gateway", http.StatusBadGateway)
+			return
+		}
+		defer c.close()
+		reader = c
+	} else {
+		reader = h
+	}
+
+	im := new(image.Gray16)
+	if err := reader.readImage(im); err != nil {
+		log.Println(err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	png.Encode(w, im)
 }
 
 func (h *handler) serveIndex(w http.ResponseWriter, r *http.Request) {

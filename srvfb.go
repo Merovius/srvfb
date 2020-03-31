@@ -24,6 +24,7 @@ import (
 	"hash/fnv"
 	"image"
 	"io"
+	"io/ioutil"
 	"log"
 	"mime"
 	"mime/multipart"
@@ -294,75 +295,11 @@ func (h *handler) serveImage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) serveIndex(w http.ResponseWriter, r *http.Request) {
-	const idx = `<!DOCTYPE html>
-<html>
-	<head>
-		<meta charset="UTF-8">
-		<title>srvfb</title>
-		<style>
-			body {
-				width: 100%;
-				height: 100%;
-			}
-
-			#stream {
-				position: absolute;
-				top: 0;
-				left: 0;
-				background: url("video");
-				background-position: center;
-				background-size: contain;
-				background-repeat: no-repeat;
-				background-color: black;
-				transform: rotate(0deg);
-			}
-		</style>
-
-		<script>
-			document.onreadystatechange = function(e) {
-				if (document.readyState !== "complete") {
-					return;
-				}
-				let rotate = 0;
-				let stream = document.querySelector('#stream')
-				let w = stream.width;
-				let h = stream.height;
-				let resize = function() {
-					let [nt, nl, nh, nw] = [0,0,0,0];
-					if ((w > h) == (rotate%2)) {
-						nh = window.innerHeight;
-						nw = window.innerWidth;
-					} else {
-						nh = window.innerWidth;
-						nw = window.innerHeight;
-					}
-					if (rotate%2) {
-						// CSS is black magic to me. We have to offset the
-						// image when it's rotated. I have no idea why these
-						// offsets work - but empirically, they seem to do.
-						nl = (nh-nw)/2;
-						nt = (nw-nh)/2;
-					}
-					stream.style.height = nh + "px";
-					stream.style.width = nw + "px";
-					stream.style.top = nt + "px";
-					stream.style.left = nl + "px";
-					stream.style.transform = 'rotate('+rotate*90+'deg)';
-				};
-				resize();
-				stream.onclick = function(ev) {
-					rotate = (rotate+1)%4;
-					resize();
-				};
-				window.onresize = resize;
-			};
-		</script>
-	</head>
-	<body>
-		<div id="stream"></div>
-	</body>
-</html>`
-	io.WriteString(w, idx)
+	file, err := ioutil.ReadFile("srvfb.html")
+    if err != nil {
+        log.Fatal(err)
+    }
+	io.WriteString(w, string(file))
 }
 
 func (h *handler) readImage(im *image.Gray16) error {

@@ -58,7 +58,7 @@ ssh root@10.11.99.1 systemctl enable --now srvfb.socket
 ```
 
 # License
-See [](LICENSE.md).
+See [LICENSE.md]().
 
 ```
 

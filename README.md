@@ -19,6 +19,11 @@ directly related to my usecase will likely be closed.
 
 You can see a short video demonstrating this [in this tweet][video]
 
+**Note: This project is not compatible with the reMarkable 2 and
+[I don't intend to change that](https://github.com/Merovius/srvfb/issues/22).
+In general, you should consider this project in maintenance mode at best - I
+don't regularly use it anymore, so I'm not really incentivized to improve it.**
+
 # Installation and usage
 
 You need a working [Go installation][go] and [ssh-access to your reMarkable][ssh].

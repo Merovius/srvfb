@@ -1,3 +1,4 @@
+//go:build ignore
 // +build ignore
 
 // generate with: GOARCH=arm go tool cgo -godefs ctypes.go | gofmt > types_arm.go
